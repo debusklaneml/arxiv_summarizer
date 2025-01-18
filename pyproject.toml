@@ -1,0 +1,12 @@
+[project]
+name = "arxiv-sumarizer"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "matplotlib>=3.10.0",
+    "pip>=24.3.1",
+    "polars>=1.19.0",
+    "streamlit>=1.41.1",
+]
