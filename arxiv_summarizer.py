@@ -4,6 +4,7 @@ import polars as pl
 import xml.etree.ElementTree as ET
 import streamlit as st
 import matplotlib.pyplot as plt
+from transformers import pipeline
 
 # Custom CSS for background color
 background_color_css = """
@@ -63,16 +64,45 @@ def fetch_arxiv_results(search_term, start=0, max_results=10):
 testing = fetch_arxiv_results("confidence", max_results=5)
 print(testing)
 
-
-def parse_arxiv_to_polars(xml_data):
+@st.cache_resource
+def load_summarization_model():
     """
-    Parse arXiv XML data into a Polars DataFrame.
+    Load and cache the summarization model to avoid reloading on every app run.
+    
+    Returns:
+        Summarization pipeline: A pre-trained summarization model pipeline.
+    """
+    return pipeline("summarization", model="facebook/bart-large-cnn")
+
+# Load the cached model
+summarizer = load_summarization_model()
+
+def summarize_text(text, max_length=140, min_length=30):
+    """
+    Summarize text using a pre-trained model.
+
+    Args:
+        text (str): The text to summarize.
+        max_length (int): Maximum summary length.
+        min_length (int): Minimum summary length.
+
+    Returns:
+        str: The summarized text.
+    """
+    if text and len(text) > min_length:
+        summary = summarizer(text, max_length=max_length, min_length=min_length, truncation=True)
+        return summary[0]['summary_text']
+    return text
+
+def parse_arxiv_to_polars_and_summarize(xml_data):
+    """
+    Parse arXiv XML data into a Polars DataFrame and summarize all articles into a single paragraph.
 
     Args:
         xml_data (str): The XML data as a string.
 
     Returns:
-        polars.DataFrame: A DataFrame containing parsed arXiv data.
+        tuple: A Polars DataFrame containing parsed arXiv data and a single summarized paragraph.
     """
     # Parse the XML string
     root = ET.fromstring(xml_data)
@@ -82,8 +112,10 @@ def parse_arxiv_to_polars(xml_data):
         'atom': 'http://www.w3.org/2005/Atom'
     }
     
-    # Extract entries
+    # Extract entries and aggregate summaries
     entries = []
+    all_summaries = ""
+    
     for entry in root.findall('atom:entry', namespaces):
         # Extract relevant fields
         title = entry.find('atom:title', namespaces).text if entry.find('atom:title', namespaces) is not None else None
@@ -91,11 +123,18 @@ def parse_arxiv_to_polars(xml_data):
         authors = [author.find('atom:name', namespaces).text for author in entry.findall('atom:author', namespaces)]
         published = entry.find('atom:published', namespaces).text if entry.find('atom:published', namespaces) is not None else None
         link = entry.find('atom:link[@rel="alternate"]', namespaces).attrib['href'] if entry.find('atom:link[@rel="alternate"]', namespaces) is not None else None
+
+        # Aggregate summaries
+        if summary:
+            all_summaries += " " + summary.strip()
+        
+        # Generate concise summary
+        concise_summary = summarize_text(summary) if summary else None
         
         # Append to entries list
         entries.append({
             "title": title,
-            "summary": summary,
+            "summary": concise_summary,
             "authors": ", ".join(authors),
             "published": published,
             "link": link
@@ -103,8 +142,11 @@ def parse_arxiv_to_polars(xml_data):
     
     # Create a Polars DataFrame
     df = pl.DataFrame(entries).sort('published', descending=True)
-
-    return df
+    
+    # Generate a single summarized paragraph from all summaries
+    overall_summary = summarize_text(all_summaries) if all_summaries else "No summaries available."
+    
+    return df, overall_summary
 
 # Add user input field for search
 search_term = st.text_input("Search for articles on arXiv...", placeholder="Enter a topic, e.g., 'machine learning'")
@@ -118,10 +160,13 @@ if search_term:
     if "An error occurred" in xml_results:
         st.error(xml_results)
     else:
-        df = parse_arxiv_to_polars(xml_results)
+        df, overall_summary = parse_arxiv_to_polars_and_summarize(xml_results)
         
         if not df.is_empty():
             st.subheader(f"Results for '{search_term}'")
             st.dataframe(df)
+            
+            st.subheader("Overall Summary")
+            st.write(overall_summary)
         else:
             st.warning("No results found. Try a different search term.")
