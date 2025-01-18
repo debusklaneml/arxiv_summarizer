@@ -61,8 +61,8 @@ def fetch_arxiv_results(search_term, start=0, max_results=10):
         return f"An error occurred: {e}"
 
 
-testing = fetch_arxiv_results("confidence", max_results=5)
-print(testing)
+# testing = fetch_arxiv_results("confidence", max_results=5)
+# print(testing)
 
 @st.cache_resource
 def load_summarization_model():
